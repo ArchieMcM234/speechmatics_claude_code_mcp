@@ -59,7 +59,8 @@ def write_transcript_file(
                 "source": source_name,
                 "transcribed_at": timestamp,
                 "duration_seconds": result.duration_seconds,
-                "accuracy": result.accuracy
+                "accuracy": result.accuracy,
+                "diarization": result.diarization
             },
             "transcript": result.transcript,
             "words": result.words or []
@@ -73,6 +74,7 @@ def write_transcript_file(
 # Source: {source_name}
 # Duration: {duration_str}
 # Accuracy: {result.accuracy}
+# Diarization: {result.diarization}
 
 """
         with open(output_path, "w", encoding="utf-8") as f:
@@ -105,6 +107,16 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "default": False,
                         "description": "Include word-level timestamps (outputs JSON instead of TXT)"
+                    },
+                    "diarize": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Enable speaker diarization to identify different speakers (S1, S2, etc.)"
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Force re-transcription even if transcript already exists"
                     }
                 },
                 "required": ["file_path"]
@@ -136,6 +148,16 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "default": False,
                         "description": "Include word-level timestamps"
+                    },
+                    "diarize": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Enable speaker diarization to identify different speakers (S1, S2, etc.)"
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Force re-transcription even if transcripts already exist"
                     },
                     "recursive": {
                         "type": "boolean",
@@ -199,6 +221,8 @@ async def handle_transcribe_file(arguments: dict) -> list[TextContent]:
     file_path = arguments["file_path"]
     accuracy = arguments.get("accuracy", "standard")
     with_timestamps = arguments.get("with_timestamps", False)
+    diarize = arguments.get("diarize", False)
+    force = arguments.get("force", False)
 
     # Validate file exists
     if not os.path.exists(file_path):
@@ -206,6 +230,26 @@ async def handle_transcribe_file(arguments: dict) -> list[TextContent]:
             "status": "error",
             "error_message": f"File not found: {file_path}"
         }, indent=2))]
+
+    # Check if transcript already exists
+    if not force:
+        existing_transcript = find_transcript(file_path)
+        if existing_transcript:
+            # Get duration for response
+            try:
+                duration = get_audio_duration(file_path)
+                duration_formatted = format_duration(duration)
+            except Exception:
+                duration = None
+                duration_formatted = "unknown"
+
+            return [TextContent(type="text", text=json.dumps({
+                "status": "skipped",
+                "message": "Transcript already exists (use force=true to re-transcribe)",
+                "transcript_path": existing_transcript,
+                "duration_seconds": duration,
+                "duration_formatted": duration_formatted
+            }, indent=2))]
 
     # Get duration
     try:
@@ -222,7 +266,8 @@ async def handle_transcribe_file(arguments: dict) -> list[TextContent]:
         result = await transcriber.transcribe(
             file_path,
             accuracy=accuracy,
-            duration_seconds=duration
+            duration_seconds=duration,
+            diarize=diarize
         )
 
         if result.status == "error":
@@ -239,7 +284,8 @@ async def handle_transcribe_file(arguments: dict) -> list[TextContent]:
             "transcript_path": transcript_path,
             "duration_seconds": duration,
             "duration_formatted": format_duration(duration),
-            "accuracy": accuracy
+            "accuracy": accuracy,
+            "diarization": diarize
         }, indent=2))]
 
     except Exception as e:
@@ -255,6 +301,8 @@ async def handle_transcribe_directory(arguments: dict) -> list[TextContent]:
     file_types = arguments.get("file_types", DEFAULT_FILE_TYPES)
     accuracy = arguments.get("accuracy", "standard")
     with_timestamps = arguments.get("with_timestamps", False)
+    diarize = arguments.get("diarize", False)
+    force = arguments.get("force", False)
     recursive = arguments.get("recursive", False)
     max_concurrent = arguments.get("max_concurrent", 10)
 
@@ -271,15 +319,43 @@ async def handle_transcribe_directory(arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps({
             "status": "success",
             "files_processed": 0,
+            "files_skipped": 0,
             "files_failed": 0,
             "transcripts": [],
             "total_duration_seconds": 0,
             "message": "No media files found in directory"
         }, indent=2))]
 
-    # Get durations for all files
-    files_with_duration = []
+    # Filter out files that already have transcripts (unless force=True)
+    files_to_transcribe = []
+    skipped_files = []
+
     for file_path in media_files:
+        existing_transcript = find_transcript(file_path)
+        if existing_transcript and not force:
+            skipped_files.append({
+                "file": file_path,
+                "transcript_path": existing_transcript,
+                "status": "skipped",
+                "message": "Transcript already exists"
+            })
+        else:
+            files_to_transcribe.append(file_path)
+
+    if not files_to_transcribe:
+        return [TextContent(type="text", text=json.dumps({
+            "status": "success",
+            "files_processed": 0,
+            "files_skipped": len(skipped_files),
+            "files_failed": 0,
+            "transcripts": skipped_files,
+            "total_duration_seconds": 0,
+            "message": "All files already have transcripts (use force=true to re-transcribe)"
+        }, indent=2))]
+
+    # Get durations for files to transcribe
+    files_with_duration = []
+    for file_path in files_to_transcribe:
         try:
             duration = get_audio_duration(file_path)
             files_with_duration.append((file_path, duration))
@@ -292,7 +368,8 @@ async def handle_transcribe_directory(arguments: dict) -> list[TextContent]:
         results = await transcriber.transcribe_batch(
             files_with_duration,
             accuracy=accuracy,
-            max_concurrent=max_concurrent
+            max_concurrent=max_concurrent,
+            diarize=diarize
         )
     except Exception as e:
         return [TextContent(type="text", text=json.dumps({
@@ -301,7 +378,7 @@ async def handle_transcribe_directory(arguments: dict) -> list[TextContent]:
         }, indent=2))]
 
     # Process results and write transcripts
-    transcripts = []
+    transcripts = list(skipped_files)  # Start with skipped files
     files_processed = 0
     files_failed = 0
     total_duration = 0
@@ -330,6 +407,7 @@ async def handle_transcribe_directory(arguments: dict) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps({
         "status": "success",
         "files_processed": files_processed,
+        "files_skipped": len(skipped_files),
         "files_failed": files_failed,
         "transcripts": transcripts,
         "total_duration_seconds": total_duration,

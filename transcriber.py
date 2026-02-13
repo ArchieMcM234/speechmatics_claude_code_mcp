@@ -23,6 +23,7 @@ class TranscriptionResult:
     words: list[dict] | None
     duration_seconds: float
     accuracy: str
+    diarization: bool
     status: str  # "success" or "error"
     error_message: str | None = None
     job_id: str | None = None
@@ -49,7 +50,8 @@ class SpeechmaticsTranscriber:
         file_path: str,
         accuracy: str = "standard",
         language: str = "en",
-        duration_seconds: float | None = None
+        duration_seconds: float | None = None,
+        diarize: bool = False
     ) -> TranscriptionResult:
         """Transcribe a single audio/video file.
 
@@ -58,6 +60,7 @@ class SpeechmaticsTranscriber:
             accuracy: "standard" or "enhanced"
             language: Language code (default: "en")
             duration_seconds: Pre-computed duration (optional, for efficiency)
+            diarize: Enable speaker diarization (default: False)
 
         Returns:
             TranscriptionResult with transcript and metadata
@@ -69,6 +72,7 @@ class SpeechmaticsTranscriber:
                 words=None,
                 duration_seconds=0,
                 accuracy=accuracy,
+                diarization=diarize,
                 status="error",
                 error_message=f"File not found: {file_path}"
             )
@@ -78,7 +82,8 @@ class SpeechmaticsTranscriber:
             op = OperatingPoint.ENHANCED if accuracy == "enhanced" else OperatingPoint.STANDARD
             config = TranscriptionConfig(
                 language=language,
-                operating_point=op
+                operating_point=op,
+                diarization="speaker" if diarize else None
             )
 
             job = await client.submit_job(
@@ -98,6 +103,7 @@ class SpeechmaticsTranscriber:
                 words=words,
                 duration_seconds=duration_seconds or 0,
                 accuracy=accuracy,
+                diarization=diarize,
                 status="success",
                 job_id=job.id
             )
@@ -110,6 +116,7 @@ class SpeechmaticsTranscriber:
                 words=None,
                 duration_seconds=duration_seconds or 0,
                 accuracy=accuracy,
+                diarization=diarize,
                 status="error",
                 error_message=error_msg
             )
@@ -120,6 +127,7 @@ class SpeechmaticsTranscriber:
                 words=None,
                 duration_seconds=duration_seconds or 0,
                 accuracy=accuracy,
+                diarization=diarize,
                 status="error",
                 error_message=str(e)
             )
@@ -172,7 +180,8 @@ class SpeechmaticsTranscriber:
         accuracy: str = "standard",
         language: str = "en",
         max_concurrent: int = 10,
-        progress_callback: Callable | None = None
+        progress_callback: Callable | None = None,
+        diarize: bool = False
     ) -> list[TranscriptionResult]:
         """Transcribe multiple files with concurrency control.
 
@@ -182,6 +191,7 @@ class SpeechmaticsTranscriber:
             language: Language code
             max_concurrent: Maximum concurrent transcription jobs
             progress_callback: Optional callback(completed, total, current_file)
+            diarize: Enable speaker diarization (default: False)
 
         Returns:
             List of TranscriptionResult objects
@@ -197,7 +207,8 @@ class SpeechmaticsTranscriber:
                     file_path,
                     accuracy=accuracy,
                     language=language,
-                    duration_seconds=duration
+                    duration_seconds=duration,
+                    diarize=diarize
                 )
                 completed += 1
                 if progress_callback:
