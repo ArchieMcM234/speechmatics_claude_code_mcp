@@ -103,6 +103,11 @@ async def list_tools() -> list[Tool]:
                         "default": "standard",
                         "description": "Transcription accuracy level"
                     },
+                    "language": {
+                        "type": "string",
+                        "default": "en",
+                        "description": "Language code (e.g. 'en', 'es', 'fr', 'de')"
+                    },
                     "with_timestamps": {
                         "type": "boolean",
                         "default": False,
@@ -143,6 +148,11 @@ async def list_tools() -> list[Tool]:
                         "enum": ["standard", "enhanced"],
                         "default": "standard",
                         "description": "Transcription accuracy level"
+                    },
+                    "language": {
+                        "type": "string",
+                        "default": "en",
+                        "description": "Language code (e.g. 'en', 'es', 'fr', 'de')"
                     },
                     "with_timestamps": {
                         "type": "boolean",
@@ -220,6 +230,7 @@ async def handle_transcribe_file(arguments: dict) -> list[TextContent]:
     """Handle transcribe_file tool call."""
     file_path = arguments["file_path"]
     accuracy = arguments.get("accuracy", "standard")
+    language = arguments.get("language", "en")
     with_timestamps = arguments.get("with_timestamps", False)
     diarize = arguments.get("diarize", False)
     force = arguments.get("force", False)
@@ -266,6 +277,7 @@ async def handle_transcribe_file(arguments: dict) -> list[TextContent]:
         result = await transcriber.transcribe(
             file_path,
             accuracy=accuracy,
+            language=language,
             duration_seconds=duration,
             diarize=diarize
         )
@@ -300,6 +312,7 @@ async def handle_transcribe_directory(arguments: dict) -> list[TextContent]:
     directory = arguments["directory"]
     file_types = arguments.get("file_types", DEFAULT_FILE_TYPES)
     accuracy = arguments.get("accuracy", "standard")
+    language = arguments.get("language", "en")
     with_timestamps = arguments.get("with_timestamps", False)
     diarize = arguments.get("diarize", False)
     force = arguments.get("force", False)
@@ -368,6 +381,7 @@ async def handle_transcribe_directory(arguments: dict) -> list[TextContent]:
         results = await transcriber.transcribe_batch(
             files_with_duration,
             accuracy=accuracy,
+            language=language,
             max_concurrent=max_concurrent,
             diarize=diarize
         )
